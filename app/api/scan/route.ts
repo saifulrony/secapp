@@ -27,6 +27,9 @@ export async function POST(request: Request) {
             cookieFlags: [] as any[],
             ssl: null as any,
             ports: [] as any[],
+            dnsRecords: { spf: false, dmarc: false } as Record<string, boolean>,
+            wafDetected: null as boolean | null,
+            fingerprint: [] as string[],
             timestamp: new Date().toISOString(),
         };
 
@@ -74,7 +77,11 @@ export async function POST(request: Request) {
             '/.git/config',
             '/robots.txt',
             '/.well-known/security.txt',
-            '/package.json'
+            '/package.json',
+            '/admin',
+            '/wp-admin',
+            '/backup',
+            '/.svn'
         ];
 
         for (const file of filesToCheck) {
@@ -203,7 +210,82 @@ export async function POST(request: Request) {
             results.ports = [];
             console.error('Port scan error', e);
         }
+        // 6. Check DNS Records (SPF / DMARC)
+        try {
+            const dns = require('dns').promises;
+            const { hostname } = new URL(targetUrl);
 
+            // SPF
+            try {
+                const txtRecords = await dns.resolveTxt(hostname);
+                const hasSpf = txtRecords.some((record: string[]) => record.join('').includes('v=spf1'));
+                results.dnsRecords.spf = hasSpf;
+            } catch (e) {
+                // Ignore standard dns errors if no txt found
+            }
+
+            // DMARC
+            try {
+                const dmarcRecords = await dns.resolveTxt(`_dmarc.${hostname}`);
+                const hasDmarc = dmarcRecords.some((record: string[]) => record.join('').includes('v=DMARC1'));
+                results.dnsRecords.dmarc = hasDmarc;
+            } catch (e) {
+                // Ignore if _dmarc doesn't exist
+            }
+        } catch (e) {
+            console.error('DNS lookup error', e);
+        }
+
+        // 7. Basic WAF Detection
+        try {
+            const wafUrl = new URL(targetUrl);
+            wafUrl.searchParams.append('test', "../../../etc/passwd"); // Simple payload
+            wafUrl.searchParams.append('id', "1' OR '1'='1"); // SQLi payload
+
+            const wafRes = await fetch(wafUrl.href, {
+                method: 'GET',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 AegisScanner/1.0'
+                }
+            });
+
+            // If we get a 403, 406, 429, or 501, it's highly likely a WAF caught the payload
+            if ([403, 406, 429, 501].includes(wafRes.status)) {
+                results.wafDetected = true;
+            } else {
+                results.wafDetected = false;
+            }
+        } catch (e) {
+            results.wafDetected = null; // Error or timeout
+        }
+
+        // 8. Tech Stack Fingerprinting (HTML parsing)
+        try {
+            const htmlRes = await fetch(targetUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 AegisScanner/1.0'
+                }
+            });
+            const html = await htmlRes.text();
+
+            const checks = [
+                { id: 'WordPress', regex: /wp-content|wp-includes/i },
+                { id: 'React', regex: /data-reactroot|react-dom/i },
+                { id: 'Vue.js', regex: /data-v-|__VUE__/i },
+                { id: 'Next.js', regex: /__NEXT_DATA__|_next\/static/i },
+                { id: 'Nuxt.js', regex: /__NUXT__/i },
+                { id: 'Angular', regex: /ng-version|ng-app/i },
+                { id: 'jQuery', regex: /jquery[\.0-9a-z-]*\.js/i },
+                { id: 'Bootstrap', regex: /bootstrap[\.0-9a-z-]*\.js|bootstrap[\.0-9a-z-]*\.css/i },
+                { id: 'Tailwind CSS', regex: /tailwind/i },
+            ];
+
+            const foundTech = checks.filter(check => check.regex.test(html)).map(check => check.id);
+            results.fingerprint = foundTech;
+
+        } catch (e) {
+            console.error('Fingerprinting error', e);
+        }
 
         return NextResponse.json(results);
     } catch (error) {

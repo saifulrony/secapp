@@ -12,6 +12,9 @@ interface ScanResult {
     cookieFlags: Array<{ name: string; secure: boolean; httpOnly: boolean; sameSite: string }>;
     ssl: { valid: boolean; issuer?: string; validFrom?: string; validTo?: string; error?: string };
     ports: Array<{ port: number; service: string; open: boolean; reason?: string }>;
+    dnsRecords: { spf: boolean; dmarc: boolean };
+    wafDetected: boolean | null;
+    fingerprint: string[];
     timestamp: string;
 }
 
@@ -236,6 +239,63 @@ export default function Scanner() {
                             )) : (
                                 <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', padding: '1rem 0' }}>Port scanning failed or unavailable.</div>
                             )}
+                        </div>
+                    </div>
+                    {/* Section 7: DNS Email Security */}
+                    <div className="result-card">
+                        <h3>
+                            <svg style={{ width: '24px', height: '24px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                            Email Security (DNS)
+                        </h3>
+                        <div>
+                            <div className="list-item">
+                                <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>SPF Record</span>
+                                <span className={`status-badge ${getBadgeClass(results.dnsRecords.spf)}`}>
+                                    {getBadgeText(results.dnsRecords.spf)}
+                                </span>
+                            </div>
+                            <div className="list-item">
+                                <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>DMARC Record</span>
+                                <span className={`status-badge ${getBadgeClass(results.dnsRecords.dmarc)}`}>
+                                    {getBadgeText(results.dnsRecords.dmarc)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Section 8: WAF & Tech Fingerprint */}
+                    <div className="result-card" style={{ gridColumn: '1 / -1' }}>
+                        <h3>
+                            <svg style={{ width: '24px', height: '24px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
+                            Deep Fingerprinting & WAF
+                        </h3>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+                            <div>
+                                <h4 style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>WAF Detection</h4>
+                                <div className="list-item" style={{ borderBottom: 'none', padding: 0 }}>
+                                    <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>Active Firewall</span>
+                                    {results.wafDetected === null ? (
+                                        <span className="status-badge neutral">Unknown</span>
+                                    ) : (
+                                        <span className={`status-badge ${results.wafDetected ? 'pass' : 'fail'}`}>
+                                            {results.wafDetected ? 'Detected' : 'Not Detected'}
+                                        </span>
+                                    )}
+                                </div>
+                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Tests basic SQLi/LFI payloads against the public endpoint.</p>
+                            </div>
+                            <div>
+                                <h4 style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Tech Stack (Frontend)</h4>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                    {results.fingerprint.length > 0 ? results.fingerprint.map((tech, idx) => (
+                                        <span key={idx} className="status-badge neutral" style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                                            {tech}
+                                        </span>
+                                    )) : (
+                                        <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>No common frameworks identified natively.</span>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
