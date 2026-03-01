@@ -24,6 +24,9 @@ export async function POST(request: Request) {
             headers: {} as Record<string, any>,
             exposedFiles: [] as any[],
             serverInfo: {} as Record<string, any>,
+            cookieFlags: [] as any[],
+            ssl: null as any,
+            ports: [] as any[],
             timestamp: new Date().toISOString(),
         };
 
@@ -96,6 +99,109 @@ export async function POST(request: Request) {
                     exists: false,
                 });
             }
+        }
+
+        // 3. Check for Cookie Security Flags
+        try {
+            const response = await fetch(targetUrl, { method: 'HEAD', redirect: 'follow' });
+            const setCookieHeaders = response.headers.get('set-cookie');
+            if (setCookieHeaders) {
+                // This is a simplified check, Next.js fetch headers might combine multiple set-cookies into one string
+                // A real-world scanner would parse this more robustly
+                const cookies = setCookieHeaders.split(/,(?=\s*[a-zA-Z0-9_\-]+(?:=|$))/);
+
+                results.cookieFlags = cookies.map((cookieStr: string) => {
+                    const parts = cookieStr.split(';').map((p: string) => p.trim());
+                    const nameValuePair = parts[0].split('=');
+                    const name = nameValuePair[0];
+
+                    const flags = parts.slice(1).map((p: string) => p.toLowerCase());
+                    return {
+                        name,
+                        secure: flags.includes('secure'),
+                        httpOnly: flags.includes('httponly'),
+                        sameSite: flags.find((f: string) => f.startsWith('samesite='))?.split('=')[1] || 'None (Missing)'
+                    }
+                });
+            } else {
+                results.cookieFlags = []; // No cookies set
+            }
+        } catch (e) {
+            console.error('Cookie flag extraction error', e);
+        }
+
+        // 4. Check SSL/TLS Certificate Check
+        if (targetUrl.startsWith('https://')) {
+            try {
+                const tls = require('tls');
+                const { hostname } = new URL(targetUrl);
+                const certData = await new Promise<any>((resolve, reject) => {
+                    const socket = tls.connect(443, hostname, { servername: hostname }, () => {
+                        const cert = socket.getPeerCertificate();
+                        socket.end();
+
+                        if (!socket.authorized) {
+                            resolve({ valid: false, error: socket.authorizationError });
+                        } else {
+                            resolve({
+                                valid: true,
+                                issuer: cert.issuer.O || cert.issuer.CN || 'Unknown',
+                                validFrom: cert.valid_from,
+                                validTo: cert.valid_to,
+                                subjectAltName: cert.subjectaltname
+                            });
+                        }
+                    });
+                    socket.on('error', reject);
+                    socket.on('timeout', () => { socket.destroy(); reject(new Error('TLS Timeout')); });
+                    socket.setTimeout(3000);
+                });
+                results.ssl = certData;
+            } catch (e: any) {
+                results.ssl = { valid: false, error: e.message || 'Failed to check SSL' };
+            }
+        }
+
+        // 5. Check Open Port Scanning (Basic)
+        try {
+            const net = require('net');
+            const { hostname } = new URL(targetUrl);
+            const portsToCheck = [
+                { port: 21, service: 'FTP' },
+                { port: 22, service: 'SSH' },
+                { port: 23, service: 'Telnet' },
+                { port: 3306, service: 'MySQL' },
+                { port: 8080, service: 'HTTP Alternative' }
+            ];
+
+            const portResults = await Promise.all(portsToCheck.map(async ({ port, service }) => {
+                return new Promise((resolve) => {
+                    const socket = new net.Socket();
+                    socket.setTimeout(2000); // 2 second timeout per port
+
+                    socket.on('connect', () => {
+                        socket.destroy();
+                        resolve({ port, service, open: true });
+                    });
+
+                    socket.on('timeout', () => {
+                        socket.destroy();
+                        resolve({ port, service, open: false, reason: 'timeout' });
+                    });
+
+                    socket.on('error', (e: any) => {
+                        socket.destroy();
+                        resolve({ port, service, open: false, reason: 'closed/filtered' });
+                    });
+
+                    socket.connect(port, hostname);
+                });
+            }));
+
+            results.ports = portResults;
+        } catch (e) {
+            results.ports = [];
+            console.error('Port scan error', e);
         }
 
 

@@ -9,6 +9,9 @@ interface ScanResult {
     headers: Record<string, { present: boolean; value: string | null }>;
     exposedFiles: Array<{ path: string; status: number | string; exists: boolean }>;
     serverInfo: { server: string; poweredBy: string };
+    cookieFlags: Array<{ name: string; secure: boolean; httpOnly: boolean; sameSite: string }>;
+    ssl: { valid: boolean; issuer?: string; validFrom?: string; validTo?: string; error?: string };
+    ports: Array<{ port: number; service: string; open: boolean; reason?: string }>;
     timestamp: string;
 }
 
@@ -151,6 +154,88 @@ export default function Scanner() {
                         </div>
                         <div style={{ marginTop: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
                             Note: Evaluated based on simple HTTP status. Real-world scenarios may involve WAFs or soft 404s.
+                        </div>
+                    </div>
+                    {/* Section 4: Cookie Security Flags */}
+                    <div className="result-card">
+                        <h3>
+                            <svg style={{ width: '24px', height: '24px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                            Cookie Flags
+                        </h3>
+                        <div>
+                            {results.cookieFlags.length > 0 ? results.cookieFlags.map((cookie, idx) => (
+                                <div key={idx} className="list-item" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.5rem' }}>
+                                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>{cookie.name}</span>
+                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                        <span className={`status-badge ${getBadgeClass(cookie.secure)}`}>
+                                            Secure: {cookie.secure ? 'Yes' : 'No'}
+                                        </span>
+                                        <span className={`status-badge ${getBadgeClass(cookie.httpOnly)}`}>
+                                            HttpOnly: {cookie.httpOnly ? 'Yes' : 'No'}
+                                        </span>
+                                        <span className="status-badge neutral">
+                                            SameSite: {cookie.sameSite.split(';')[0]}
+                                        </span>
+                                    </div>
+                                </div>
+                            )) : (
+                                <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', padding: '1rem 0' }}>No cookies returned.</div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Section 5: SSL/TLS Certificate */}
+                    <div className="result-card">
+                        <h3>
+                            <svg style={{ width: '24px', height: '24px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                            SSL / TLS Certificate
+                        </h3>
+                        <div>
+                            {results.ssl ? (
+                                results.ssl.valid ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                        <div className="list-item">
+                                            <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>Status</span>
+                                            <span className="status-badge pass">Valid</span>
+                                        </div>
+                                        <div className="list-item">
+                                            <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>Issuer</span>
+                                            <span style={{ fontSize: '0.875rem', textAlign: 'right', color: 'var(--text-muted)' }}>{results.ssl.issuer}</span>
+                                        </div>
+                                        <div className="list-item" style={{ flexDirection: 'column', alignItems: 'flex-start', borderBottom: 'none' }}>
+                                            <span style={{ fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>Expires</span>
+                                            <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>{new Date(results.ssl.validTo || '').toLocaleDateString()}</span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="list-item">
+                                        <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>Status</span>
+                                        <span className="status-badge fail">Invalid / Error</span>
+                                    </div>
+                                )
+                            ) : (
+                                <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', padding: '1rem 0' }}>HTTP site or SSL check not available locally.</div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Section 6: Open Ports */}
+                    <div className="result-card">
+                        <h3>
+                            <svg style={{ width: '24px', height: '24px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
+                            Port Scanning (Top 5)
+                        </h3>
+                        <div>
+                            {results.ports.length > 0 ? results.ports.map((port, idx) => (
+                                <div key={idx} className="list-item">
+                                    <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>{port.port} / {port.service}</span>
+                                    <span className={`status-badge ${getFileBadgeClass(port.open)}`}>
+                                        {port.open ? 'OPEN' : 'Closed'}
+                                    </span>
+                                </div>
+                            )) : (
+                                <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', padding: '1rem 0' }}>Port scanning failed or unavailable.</div>
+                            )}
                         </div>
                     </div>
                 </div>
