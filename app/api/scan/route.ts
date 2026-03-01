@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+export async function GET() {
+    return NextResponse.json({ error: 'Method not allowed. Please use the frontend scanner to submit a POST request.' }, { status: 405 });
+}
 export async function POST(request: Request) {
     try {
         const { url } = await request.json();
@@ -68,7 +71,7 @@ export async function POST(request: Request) {
 
         } catch (e: any) {
             console.error('Fetch error for headers:', e);
-            return NextResponse.json({ error: `Failed to access target URL. Reason: ${e.message || 'Unknown'}` }, { status: 500 });
+            return NextResponse.json({ error: `Failed to access target URL. Reason: ${e.message || 'Unknown'}. Ensure the site is reachable and online.` }, { status: 400 });
         }
 
         // 2. Check for common exposed files (Basic implementation)
