@@ -33,7 +33,8 @@ export default function Scanner() {
         setErrorMessage('');
 
         try {
-            const response = await fetch('/api/scan', {
+            const apiUrl = `${window.location.origin}/api/scan`;
+            const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ url }),
