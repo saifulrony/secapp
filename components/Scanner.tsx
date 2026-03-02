@@ -299,6 +299,85 @@ export default function Scanner() {
                             </div>
                         </div>
                     </div>
+
+                    {/* Section 9: Automated Remediation Engine (V4) */}
+                    <div className="result-card" style={{ gridColumn: '1 / -1', background: 'rgba(56, 189, 248, 0.05)', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                        <h3>
+                            <svg style={{ width: '24px', height: '24px', color: '#38bdf8' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+                            Actionable Remediation Report
+                        </h3>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            {/* Missing Headers */}
+                            {Object.entries(results.headers).filter(([_, data]) => !data.present).map(([header]) => (
+                                <div key={header} style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '0.5rem', borderLeft: '4px solid var(--error)' }}>
+                                    <h4 style={{ margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        Missing Security Header: {header}
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                                        <strong>Fix:</strong> Add this header to your web server configuration (Nginx/Apache/Cloudflare).
+                                        {header === 'Strict-Transport-Security' && ' Example: `add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";`'}
+                                        {header === 'Content-Security-Policy' && ' Example: `add_header Content-Security-Policy "default-src \'self\'";`'}
+                                    </p>
+                                </div>
+                            ))}
+
+                            {/* Exposed Files */}
+                            {results.exposedFiles.filter(f => f.exists).map(file => (
+                                <div key={file.path} style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '0.5rem', borderLeft: '4px solid var(--error)' }}>
+                                    <h4 style={{ margin: '0 0 0.5rem 0' }}>Exposed Sensitive Path: {file.path}</h4>
+                                    <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                                        <strong>Fix:</strong> Your server is publicly returning 200 OK for this path. You must configure your web server to block direct access to this directory immediately. On Nginx: `location ~ /{file.path.split('/')[1]} {'{'} return 404; {'}'}`.
+                                    </p>
+                                </div>
+                            ))}
+
+                            {/* Weak Cookies */}
+                            {results.cookieFlags.filter(c => !c.secure || !c.httpOnly).map((cookie, idx) => (
+                                <div key={`cookie-${idx}`} style={{ padding: '1rem', background: 'rgba(245, 158, 11, 0.05)', borderRadius: '0.5rem', borderLeft: '4px solid var(--warning)' }}>
+                                    <h4 style={{ margin: '0 0 0.5rem 0' }}>Insecure Session Cookie: {cookie.name}</h4>
+                                    <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                                        <strong>Fix:</strong> This cookie is missing {!cookie.secure && 'Secure'} {!cookie.secure && !cookie.httpOnly && ' and '} {!cookie.httpOnly && 'HttpOnly'} flags. Ensure your backend explicitly sets these attributes when issuing the `Set-Cookie` header to prevent XSS hijacking and ensure transmission only over HTTPS.
+                                    </p>
+                                </div>
+                            ))}
+
+                            {/* Open Vulnerable Ports */}
+                            {results.ports.filter(p => p.open && p.port !== 443 && p.port !== 80).map((port, idx) => (
+                                <div key={`port-${idx}`} style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '0.5rem', borderLeft: '4px solid var(--error)' }}>
+                                    <h4 style={{ margin: '0 0 0.5rem 0' }}>Exposed High-Risk Port: {port.port} ({port.service})</h4>
+                                    <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                                        <strong>Fix:</strong> This management or database port is exposed to the public internet. Reconfigure your server firewall (iptables/UFW) or Cloud Provider Security Group to block inbound traffic to port {port.port} entirely, or restrict access strictly to trusted IP addresses.
+                                    </p>
+                                </div>
+                            ))}
+
+                            {/* Missing DNS Records */}
+                            {(!results.dnsRecords.spf || !results.dnsRecords.dmarc) && (
+                                <div style={{ padding: '1rem', background: 'rgba(245, 158, 11, 0.05)', borderRadius: '0.5rem', borderLeft: '4px solid var(--warning)' }}>
+                                    <h4 style={{ margin: '0 0 0.5rem 0' }}>Domain Vulnerable to Email Spoofing</h4>
+                                    <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                                        <strong>Fix:</strong> Missing {!results.dnsRecords.spf && 'SPF'} {!results.dnsRecords.spf && !results.dnsRecords.dmarc && ' and '} {!results.dnsRecords.dmarc && 'DMARC'} TXT records on your root domain. Attackers can forge emails appearing to come from your domain. Log into your domain registrar (e.g. Cloudflare, Route53, GoDaddy) and configure strict SPF (`v=spf1`) and DMARC (`v=DMARC1; p=reject;`) policies.
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* All Good Fallback */}
+                            {Object.entries(results.headers).every(([_, data]) => data.present) &&
+                                results.exposedFiles.every(f => !f.exists) &&
+                                results.cookieFlags.every(c => c.secure && c.httpOnly) &&
+                                results.ports.every(p => !p.open || p.port === 80 || p.port === 443) &&
+                                results.dnsRecords.spf && results.dnsRecords.dmarc && (
+                                    <div style={{ padding: '2rem', textAlign: 'center', background: 'rgba(16, 185, 129, 0.05)', borderRadius: '0.5rem', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                                        <svg style={{ width: '48px', height: '48px', color: 'var(--pass)', margin: '0 auto 1rem auto' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                        <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--pass)' }}>Excellent Security Posture</h4>
+                                        <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                                            No critical vulnerabilities, exposed ports, or missing baseline security controls were detected in this dynamic scan.
+                                        </p>
+                                    </div>
+                                )}
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
