@@ -262,7 +262,7 @@ export async function POST(request: Request) {
             results.wafDetected = null; // Error or timeout
         }
 
-        // 8. Tech Stack Fingerprinting (HTML parsing)
+        // 8. Deep Tech Stack & Version Fingerprinting (V5)
         try {
             const htmlRes = await fetch(targetUrl, {
                 headers: {
@@ -271,20 +271,81 @@ export async function POST(request: Request) {
             });
             const html = await htmlRes.text();
 
-            const checks = [
-                { id: 'WordPress', regex: /wp-content|wp-includes/i },
-                { id: 'React', regex: /data-reactroot|react-dom/i },
-                { id: 'Vue.js', regex: /data-v-|__VUE__/i },
-                { id: 'Next.js', regex: /__NEXT_DATA__|_next\/static/i },
-                { id: 'Nuxt.js', regex: /__NUXT__/i },
-                { id: 'Angular', regex: /ng-version|ng-app/i },
-                { id: 'jQuery', regex: /jquery[\.0-9a-z-]*\.js/i },
-                { id: 'Bootstrap', regex: /bootstrap[\.0-9a-z-]*\.js|bootstrap[\.0-9a-z-]*\.css/i },
-                { id: 'Tailwind CSS', regex: /tailwind/i },
-            ];
+            const fingerprintSet = new Set<string>();
 
-            const foundTech = checks.filter(check => check.regex.test(html)).map(check => check.id);
-            results.fingerprint = foundTech;
+            // 8a. Parse Server & X-Powered-By for versions
+            const serverHeader = results.serverInfo.server;
+            const poweredBy = results.serverInfo.poweredBy;
+
+            if (serverHeader && serverHeader !== 'Unknown') {
+                const match = serverHeader.match(/^([a-zA-Z\-]+)\/?([\d\.]*)/);
+                if (match && match[2]) {
+                    fingerprintSet.add(`${match[1].charAt(0).toUpperCase() + match[1].slice(1)} (${match[2]})`);
+                } else if (match && match[1]) {
+                    fingerprintSet.add(match[1].charAt(0).toUpperCase() + match[1].slice(1));
+                } else {
+                    fingerprintSet.add(serverHeader);
+                }
+            }
+
+            if (poweredBy && poweredBy !== 'Unknown') {
+                const match = poweredBy.match(/^([a-zA-Z\-]+)\/?([\d\.]*)/);
+                if (match && match[2]) {
+                    fingerprintSet.add(`${match[1].charAt(0).toUpperCase() + match[1].slice(1)} (${match[2]})`);
+                } else {
+                    fingerprintSet.add(poweredBy);
+                }
+            }
+
+            // 8b. Parse Meta Generator for CMS string/versions
+            const metaGenMatch = html.match(/<meta[^>]+name=["']generator["'][^>]+content=["']([^"']+)["']/i) ||
+                html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']generator["']/i);
+            if (metaGenMatch && metaGenMatch[1]) {
+                fingerprintSet.add(metaGenMatch[1]);
+            }
+
+            // 8c. CDN Script Regex Extraction
+            const regex = /<script[^>]+src=["']([^"']+)["']/gi;
+            let match;
+            while ((match = regex.exec(html)) !== null) {
+                const src = match[1].toLowerCase();
+
+                // UNPKG / JSDelivr (e.g. unpkg.com/react@18.2.0/...)
+                const npmMatch = src.match(/(?:unpkg\.com|cdn\.jsdelivr\.net\/npm)\/([a-z0-9\-_]+)@([\d\.]+)/);
+                if (npmMatch) {
+                    const pkg = npmMatch[1].charAt(0).toUpperCase() + npmMatch[1].slice(1);
+                    fingerprintSet.add(`${pkg} (${npmMatch[2]})`);
+                    continue;
+                }
+
+                // CDNJS (e.g. cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/...)
+                const cdnjsMatch = src.match(/cdnjs\.cloudflare\.com\/ajax\/libs\/([a-z0-9\-_]+)\/([\d\.]+)/);
+                if (cdnjsMatch) {
+                    const pkg = cdnjsMatch[1].charAt(0).toUpperCase() + cdnjsMatch[1].slice(1);
+                    fingerprintSet.add(`${pkg} (${cdnjsMatch[2]})`);
+                    continue;
+                }
+
+                // Local generic jquery files
+                const localJqMatch = src.match(/jquery-([\d\.]+)\.min\.js/);
+                if (localJqMatch) {
+                    fingerprintSet.add(`JQuery (${localJqMatch[1]})`);
+                }
+            }
+
+            // 8d. Fallback heuristics for common tools if no version was explicitly found
+            const fingerprintStr = Array.from(fingerprintSet).join(' ').toLowerCase();
+
+            if (html.includes('_next') && !fingerprintStr.includes('next.js')) fingerprintSet.add('Next.js');
+            if (html.includes('wp-content') && !fingerprintStr.includes('wordpress')) fingerprintSet.add('WordPress');
+            if (html.match(/data-reactroot|react-dom/i) && !fingerprintStr.includes('react')) fingerprintSet.add('React');
+            if (html.match(/data-v-|__VUE__/i) && !fingerprintStr.includes('vue')) fingerprintSet.add('Vue.js');
+            if (html.match(/__NUXT__/i) && !fingerprintStr.includes('nuxt')) fingerprintSet.add('Nuxt.js');
+            if (html.match(/ng-version|ng-app/i) && !fingerprintStr.includes('angular')) fingerprintSet.add('Angular');
+            if (html.match(/tailwind/i) && !fingerprintStr.includes('tailwind')) fingerprintSet.add('Tailwind CSS');
+            if (html.match(/bootstrap/i) && !fingerprintStr.includes('bootstrap')) fingerprintSet.add('Bootstrap');
+
+            results.fingerprint = Array.from(fingerprintSet);
 
         } catch (e) {
             console.error('Fingerprinting error', e);
