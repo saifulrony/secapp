@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 
 type ScanStatus = 'idle' | 'scanning' | 'complete' | 'error';
 
@@ -11,7 +11,15 @@ interface ScanResult {
     serverInfo: { server: string; poweredBy: string };
     cookieFlags: Array<{ name: string; secure: boolean; httpOnly: boolean; sameSite: string }>;
     ssl: { valid: boolean; issuer?: string; validFrom?: string; validTo?: string; error?: string };
-    ports: Array<{ port: number; service: string; open: boolean; reason?: string }>;
+    ports: Array<{ 
+            port: number; 
+            service: string; 
+            open: boolean; 
+            reason?: string;
+            verified?: boolean;
+            banner?: string;
+            note?: string;
+        }>;
     dnsRecords: { spf: boolean; dmarc: boolean };
     wafDetected: boolean | null;
     fingerprint: string[];
@@ -23,6 +31,11 @@ export default function Scanner() {
     const [status, setStatus] = useState<ScanStatus>('idle');
     const [results, setResults] = useState<ScanResult | null>(null);
     const [errorMessage, setErrorMessage] = useState('');
+    const [hasMounted, setHasMounted] = React.useState(false);
+
+    React.useEffect(() => {
+        setHasMounted(true);
+    }, []);
 
     const handleScan = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -112,7 +125,7 @@ export default function Scanner() {
                             </div>
                             <div>
                                 <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Time</div>
-                                <div style={{ fontWeight: 600 }}>{new Date(results.timestamp).toLocaleTimeString()}</div>
+                                <div style={{ fontWeight: 600 }}>{hasMounted ? new Date(results.timestamp).toLocaleTimeString() : '...'}</div>
                             </div>
                         </div>
                     </div>
@@ -125,11 +138,19 @@ export default function Scanner() {
                         </h3>
                         <div>
                             {Object.entries(results.headers).map(([header, data]) => (
-                                <div key={header} className="list-item">
-                                    <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>{header}</span>
-                                    <span className={`status-badge ${getBadgeClass(data.present)}`}>
-                                        {getBadgeText(data.present)}
-                                    </span>
+                                <div key={header} className="list-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                        <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>{header}</span>
+                                        <span className={`status-badge ${getBadgeClass(data.present)}`}>
+                                            {getBadgeText(data.present)}
+                                        </span>
+                                    </div>
+                                    {!data.present && (
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', borderLeft: '2px solid var(--error)', paddingLeft: '0.5rem' }}>
+                                            <p style={{ margin: '0 0 0.25rem 0' }}><strong>Impact:</strong> Increased risk of {header === 'Content-Security-Policy' ? 'XSS and code injection' : header === 'X-Frame-Options' ? 'Clickjacking attacks' : 'man-in-the-middle exploits'}.</p>
+                                            <p style={{ margin: 0 }}><strong>Fix:</strong> Configure your server to send the `{header}` header with secure defaults.</p>
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -143,14 +164,22 @@ export default function Scanner() {
                         </h3>
                         <div>
                             {results.exposedFiles.length > 0 ? results.exposedFiles.map((file, idx) => (
-                                <div key={idx} className="list-item">
-                                    <span style={{ fontSize: '0.875rem', fontFamily: 'monospace' }}>{file.path}</span>
-                                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                                        {file.status !== 'Error' && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>[{file.status}]</span>}
-                                        <span className={`status-badge ${getFileBadgeClass(file.exists)}`}>
-                                            {getFileBadgeText(file.exists)}
-                                        </span>
+                                <div key={idx} className="list-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                        <span style={{ fontSize: '0.875rem', fontFamily: 'monospace' }}>{file.path}</span>
+                                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                            {file.status !== 'Error' && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>[{file.status}]</span>}
+                                            <span className={`status-badge ${getFileBadgeClass(file.exists)}`}>
+                                                {getFileBadgeText(file.exists)}
+                                            </span>
+                                        </div>
                                     </div>
+                                    {file.exists && (
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', borderLeft: '2px solid var(--error)', paddingLeft: '0.5rem' }}>
+                                            <p style={{ margin: '0 0 0.25rem 0' }}><strong>Impact:</strong> Attackers can read sensitive {file.path === '/.env' ? 'credentials and secrets' : file.path === '/.git/config' ? 'source code metadata' : 'server information'}.</p>
+                                            <p style={{ margin: 0 }}><strong>Fix:</strong> Block access to `{file.path}` in your server configuration or move it out of the public web root.</p>
+                                        </div>
+                                    )}
                                 </div>
                             )) : (
                                 <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', padding: '1rem 0' }}>No files checked.</div>
@@ -181,6 +210,12 @@ export default function Scanner() {
                                             SameSite: {cookie.sameSite.split(';')[0]}
                                         </span>
                                     </div>
+                                    {(!cookie.secure || !cookie.httpOnly) && (
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', borderLeft: '2px solid var(--warning)', paddingLeft: '0.5rem', marginTop: '0.25rem' }}>
+                                            <p style={{ margin: '0 0 0.25rem 0' }}><strong>Impact:</strong> {!cookie.httpOnly ? 'Session hijacking via XSS (missing HttpOnly)' : ''} {!cookie.httpOnly && !cookie.secure ? ' and ' : ''} {!cookie.secure ? 'traffic sniffing over HTTP (missing Secure)' : ''}.</p>
+                                            <p style={{ margin: 0 }}><strong>Fix:</strong> Explicitly set the `{(!cookie.secure ? 'Secure; ' : '') + (!cookie.httpOnly ? 'HttpOnly; ' : '')}` attributes in your Set-Cookie header.</p>
+                                        </div>
+                                    )}
                                 </div>
                             )) : (
                                 <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', padding: '1rem 0' }}>No cookies returned.</div>
@@ -231,11 +266,37 @@ export default function Scanner() {
                         </h3>
                         <div>
                             {results.ports.length > 0 ? results.ports.map((port, idx) => (
-                                <div key={idx} className="list-item">
-                                    <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>{port.port} / {port.service}</span>
-                                    <span className={`status-badge ${getFileBadgeClass(port.open)}`}>
-                                        {port.open ? 'OPEN' : 'Closed'}
-                                    </span>
+                                <div key={idx} className="list-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                                            <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>{port.port} / {port.service}</span>
+                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                {port.open && (
+                                                    <span className={`status-badge ${port.verified ? 'pass' : 'neutral'}`} style={{ fontSize: '0.65rem' }}>
+                                                        {port.verified ? 'VERIFIED' : 'UNVERIFIED'}
+                                                    </span>
+                                                )}
+                                                <span className={`status-badge ${port.open ? 'fail' : 'pass'}`}>{port.open ? 'OPEN' : 'Closed'}</span>
+                                            </div>
+                                        </div>
+                                        {port.banner && (
+                                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'monospace', background: 'rgba(255,255,255,0.03)', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>
+                                                {port.banner}
+                                            </div>
+                                        )}
+                                        {port.note && !port.verified && (
+                                            <div style={{ fontSize: '0.65rem', color: '#fbbf24', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                                <svg style={{ width: '12px', height: '12px' }} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"></path></svg>
+                                                {port.note}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {port.open && port.port !== 80 && port.port !== 443 && (
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', borderLeft: '2px solid var(--error)', paddingLeft: '0.5rem' }}>
+                                            <p style={{ margin: '0 0 0.25rem 0' }}><strong>Impact:</strong> Direct access to {port.service} allows brute-force attacks or exploitation of service-level vulnerabilities.</p>
+                                            <p style={{ margin: 0 }}><strong>Fix:</strong> Close this port in your firewall or restrict it to trusted administrative IPs.</p>
+                                        </div>
+                                    )}
                                 </div>
                             )) : (
                                 <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', padding: '1rem 0' }}>Port scanning failed or unavailable.</div>
@@ -249,17 +310,33 @@ export default function Scanner() {
                             Email Security (DNS)
                         </h3>
                         <div>
-                            <div className="list-item">
-                                <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>SPF Record</span>
-                                <span className={`status-badge ${getBadgeClass(results.dnsRecords.spf)}`}>
-                                    {getBadgeText(results.dnsRecords.spf)}
-                                </span>
+                            <div className="list-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>SPF Record</span>
+                                    <span className={`status-badge ${getBadgeClass(results.dnsRecords.spf)}`}>
+                                        {getBadgeText(results.dnsRecords.spf)}
+                                    </span>
+                                </div>
+                                {!results.dnsRecords.spf && (
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', borderLeft: '2px solid var(--warning)', paddingLeft: '0.5rem' }}>
+                                        <p style={{ margin: '0 0 0.25rem 0' }}><strong>Impact:</strong> Increases risks of email spoofing and poor email deliverability.</p>
+                                        <p style={{ margin: 0 }}><strong>Fix:</strong> Add a `v=spf1` TXT record to your DNS configuration.</p>
+                                    </div>
+                                )}
                             </div>
-                            <div className="list-item">
-                                <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>DMARC Record</span>
-                                <span className={`status-badge ${getBadgeClass(results.dnsRecords.dmarc)}`}>
-                                    {getBadgeText(results.dnsRecords.dmarc)}
-                                </span>
+                            <div className="list-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>DMARC Record</span>
+                                    <span className={`status-badge ${getBadgeClass(results.dnsRecords.dmarc)}`}>
+                                        {getBadgeText(results.dnsRecords.dmarc)}
+                                    </span>
+                                </div>
+                                {!results.dnsRecords.dmarc && (
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', borderLeft: '2px solid var(--warning)', paddingLeft: '0.5rem' }}>
+                                        <p style={{ margin: '0 0 0.25rem 0' }}><strong>Impact:</strong> Attackers can impersonate your domain in phishing emails.</p>
+                                        <p style={{ margin: 0 }}><strong>Fix:</strong> Configure a DMARC policy (e.g., `v=DMARC1; p=quarantine;`) in your DNS.</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -346,8 +423,12 @@ export default function Scanner() {
                             {results.ports.filter(p => p.open && p.port !== 443 && p.port !== 80).map((port, idx) => (
                                 <div key={`port-${idx}`} style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '0.5rem', borderLeft: '4px solid var(--error)' }}>
                                     <h4 style={{ margin: '0 0 0.5rem 0' }}>Exposed High-Risk Port: {port.port} ({port.service})</h4>
+                                    <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                                        <strong>Status:</strong> {port.verified ? 'Service verified via handshake.' : 'Connection accepted, but service was not verified (possible firewall/sinkhole).'}
+                                        {port.banner && <span style={{ display: 'block', marginTop: '0.25rem', padding: '0.25rem', background: 'rgba(0,0,0,0.2)', borderRadius: '4px', fontFamily: 'monospace' }}>Banner: {port.banner}</span>}
+                                    </p>
                                     <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-                                        <strong>Fix:</strong> This management or database port is exposed to the public internet. Reconfigure your server firewall (iptables/UFW) or Cloud Provider Security Group to block inbound traffic to port {port.port} entirely, or restrict access strictly to trusted IP addresses.
+                                        <strong>Fix:</strong> This {!port.verified && 'potentially '}exposed port allows unauthorized access to critical services. Reconfigure your server firewall (iptables/UFW) or Cloud Provider Security Group to block inbound traffic to port {port.port} entirely.
                                     </p>
                                 </div>
                             ))}

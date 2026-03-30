@@ -180,28 +180,83 @@ export async function POST(request: Request) {
                 { port: 21, service: 'FTP' },
                 { port: 22, service: 'SSH' },
                 { port: 23, service: 'Telnet' },
+                { port: 25, service: 'SMTP' },
+                { port: 53, service: 'DNS' },
+                { port: 80, service: 'HTTP' },
+                { port: 110, service: 'POP3' },
+                { port: 111, service: 'RPCBind' },
+                { port: 135, service: 'MSRPC' },
+                { port: 139, service: 'NetBIOS' },
+                { port: 143, service: 'IMAP' },
+                { port: 443, service: 'HTTPS' },
+                { port: 445, service: 'SMB' },
+                { port: 993, service: 'IMAPS' },
+                { port: 995, service: 'POP3S' },
+                { port: 1723, service: 'PPTP' },
                 { port: 3306, service: 'MySQL' },
-                { port: 8080, service: 'HTTP Alternative' }
+                { port: 3389, service: 'RDP' },
+                { port: 5432, service: 'PostgreSQL' },
+                { port: 5900, service: 'VNC' },
+                { port: 6379, service: 'Redis' },
+                { port: 8080, service: 'HTTP-Alt' },
+                { port: 13000, service: 'SecApp (Current)' }
             ];
 
             const portResults = await Promise.all(portsToCheck.map(async ({ port, service }) => {
                 return new Promise((resolve) => {
                     const socket = new net.Socket();
-                    socket.setTimeout(2000); // 2 second timeout per port
+                    socket.setTimeout(5000); 
+
+                    let isOpen = false;
+                    let hasResolved = false;
+
+                    const safeResolve = (data: any) => {
+                        if (hasResolved) return;
+                        hasResolved = true;
+                        socket.destroy();
+                        resolve(data);
+                    };
 
                     socket.on('connect', () => {
-                        socket.destroy();
-                        resolve({ port, service, open: true });
+                        isOpen = true;
+                        // For banner services, give it a moment to send data
+                        if ([21, 22, 23, 3306].includes(port)) {
+                            setTimeout(() => {
+                                safeResolve({ port, service, open: true, verified: false });
+                            }, 1500);
+                        } 
+                        // For HTTP ports, send a HEAD probe to verify the service
+                        else if ([80, 443, 8080, 13000].includes(port)) {
+                            socket.write(`HEAD / HTTP/1.0\r\nHost: ${hostname}\r\nConnection: close\r\n\r\n`);
+                            setTimeout(() => {
+                                safeResolve({ port, service, open: true, verified: false, note: 'No HTTP response received' });
+                            }, 2000);
+                        }
+                        else {
+                            safeResolve({ port, service, open: true, verified: true });
+                        }
+                    });
+
+                    socket.on('data', (data: Buffer) => {
+                        const banner = data.toString().trim();
+                        // Verify if it looks like a real service response
+                        const isVerified = banner.length > 5 || banner.includes('HTTP/1.') || banner.includes('SSH-');
+                        
+                        safeResolve({ 
+                            port, 
+                            service, 
+                            open: true, 
+                            verified: isVerified, 
+                            banner: banner.slice(0, 100)
+                        });
                     });
 
                     socket.on('timeout', () => {
-                        socket.destroy();
-                        resolve({ port, service, open: false, reason: 'timeout' });
+                        safeResolve({ port, service, open: false, reason: 'timeout' });
                     });
 
                     socket.on('error', (e: any) => {
-                        socket.destroy();
-                        resolve({ port, service, open: false, reason: 'closed/filtered' });
+                        safeResolve({ port, service, open: false, reason: e.code === 'ECONNREFUSED' ? 'closed' : 'filtered' });
                     });
 
                     socket.connect(port, hostname);
